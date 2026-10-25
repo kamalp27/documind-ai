@@ -1,8 +1,11 @@
 """Pytest shared fixtures for DocuMind AI backend tests."""
 
 import io
+import math
 from pathlib import Path
+import re
 from typing import Generator
+import zlib
 import pymupdf as fitz
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +25,7 @@ from app.services.vector_store import ChromaVectorStore
 
 
 class MockEmbeddingService(EmbeddingService):
-    """Mock embedding service that produces deterministic 384-dimensional vectors without downloading models."""
+    """Mock embedding service that produces deterministic 384-dimensional vectors based on text content without downloading models."""
 
     def __init__(self):
         super().__init__(model_name="mock-model")
@@ -30,8 +33,34 @@ class MockEmbeddingService(EmbeddingService):
     def embed_texts(self, texts):
         if not texts:
             return []
-        # Return deterministic synthetic 384-dim float vectors with positive non-zero norm
-        return [[(0.05 * (i % 10) + 0.1) for _ in range(384)] for i, _ in enumerate(texts)]
+
+        results = []
+        for text in texts:
+            words = set(re.findall(r"\b[a-z]{3,}\b", (text or "").lower()))
+            vec = [0.0] * 384
+
+            # Domain affinity subspace (dims 0-127) for technical/document corpus
+            tech_words = {
+                "documind", "ai", "architecture", "overview", "page", "retrieval", "generation",
+                "neural", "semantic", "search", "vector", "database", "chromadb", "embeddings",
+                "indexing", "citations", "chunks", "metadata", "document", "model", "traceability",
+                "indexes", "networks", "policy", "information", "question",
+            }
+            if words.intersection(tech_words):
+                for i in range(128):
+                    vec[i] = 0.5
+
+            # Term-specific sparse hashing (dims 128-383)
+            for word in words:
+                slot = 128 + (zlib.crc32(word.encode("utf-8")) % 256)
+                vec[slot] += 2.0
+
+            norm = math.sqrt(sum(x * x for x in vec))
+            if norm == 0:
+                results.append([1.0 / math.sqrt(384)] * 384)
+            else:
+                results.append([x / norm for x in vec])
+        return results
 
 
 class MockGeminiService(GeminiService):

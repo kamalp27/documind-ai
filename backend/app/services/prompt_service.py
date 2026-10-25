@@ -1,12 +1,25 @@
 """Grounded prompt construction service enforcing anti-hallucination and security boundaries."""
 
 import logging
+import re
 from typing import List, Tuple
 from app.config import get_settings
 from app.schemas.chat import CitationSource
 from app.services.retrieval_service import RetrievedPassage
 
 logger = logging.getLogger("documind.prompt")
+
+
+def _sanitize_boundary_tags(text: str) -> str:
+    """Escape XML boundary tags in untrusted content to prevent prompt delimiter injection."""
+    if not text:
+        return ""
+    return re.sub(
+        r"<\s*/?\s*(?:document_context|context|system_instruction)[^>]*>",
+        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
+        text,
+        flags=re.IGNORECASE,
+    )
 
 SYSTEM_INSTRUCTION = """You are DocuMind AI, a precision document question answering assistant.
 Your task is to answer the user's question accurately and objectively using ONLY the provided document excerpts.
@@ -60,7 +73,8 @@ class PromptService:
 
         for idx, passage in enumerate(passages, start=1):
             source_header = f"[Source {idx}] (Document: {passage.filename}, Page: {', '.join(map(str, passage.page_numbers))})"
-            block = f"{source_header}\n{passage.text}\n"
+            sanitized_text = _sanitize_boundary_tags(passage.text)
+            block = f"{source_header}\n{sanitized_text}\n"
 
             # Check context character budget
             if current_chars + len(block) > max_chars and context_blocks:
@@ -86,11 +100,12 @@ class PromptService:
             )
 
         context_text = "\n".join(context_blocks)
+        cleaned_question = _sanitize_boundary_tags(question.strip())
         user_content = (
             f"<document_context>\n"
             f"{context_text}\n"
             f"</document_context>\n\n"
-            f"User Question: {question.strip()}\n\n"
+            f"User Question: {cleaned_question}\n\n"
             f"Answer the question using only the verified facts from <document_context> with inline [Source #] citations. "
             f"If the context does not contain the answer, respond with the required insufficient evidence message."
         )
