@@ -20,7 +20,7 @@ class GeminiService:
         model_name: Optional[str] = None,
     ):
         settings = get_settings()
-        self.api_key = api_key or settings.GEMINI_API_KEY
+        self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
         self.model_name = model_name or settings.GEMINI_MODEL
         self._client = None
 
