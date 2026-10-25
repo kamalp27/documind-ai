@@ -12,8 +12,12 @@ from app.main import app
 from app.services.chunking_service import ChunkingService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
+from app.services.gemini_service import GeminiService
 from app.services.metadata_store import DocumentMetadataStore
 from app.services.pdf_service import PDFService
+from app.services.prompt_service import PromptService
+from app.services.rag_service import RAGService
+from app.services.retrieval_service import RetrievalService
 from app.services.vector_store import ChromaVectorStore
 
 
@@ -26,14 +30,35 @@ class MockEmbeddingService(EmbeddingService):
     def embed_texts(self, texts):
         if not texts:
             return []
-        # Return synthetic 384-dim normalized float vectors
+        # Return deterministic synthetic 384-dim float vectors
         return [[0.05 * (i % 10) for _ in range(384)] for i, _ in enumerate(texts)]
+
+
+class MockGeminiService(GeminiService):
+    """Mock Gemini service that simulates LLM generation without network calls or API keys."""
+
+    def __init__(self, response_text: str = "According to [1], DocuMind AI uses ChromaDB for semantic search."):
+        super().__init__(api_key="mock-api-key", model_name="gemini-mock")
+        self.response_text = response_text
+        self.last_system_instruction = None
+        self.last_user_content = None
+
+    def generate_answer(self, system_instruction: str, user_content: str) -> str:
+        self.last_system_instruction = system_instruction
+        self.last_user_content = user_content
+        return self.response_text
 
 
 @pytest.fixture
 def mock_embedding_service() -> MockEmbeddingService:
     """Fixture providing a mock embedding service for fast, offline unit testing."""
     return MockEmbeddingService()
+
+
+@pytest.fixture
+def mock_gemini_service() -> MockGeminiService:
+    """Fixture providing a mock Gemini service returning grounded answers."""
+    return MockGeminiService()
 
 
 @pytest.fixture
@@ -71,6 +96,33 @@ def test_document_service(
         embedding_service=mock_embedding_service,
         vector_store=test_vector_store,
         metadata_store=test_metadata_store,
+    )
+
+
+@pytest.fixture
+def test_retrieval_service(
+    mock_embedding_service: MockEmbeddingService,
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+) -> RetrievalService:
+    """Fixture providing a RetrievalService bound to test storage."""
+    return RetrievalService(
+        embedding_service=mock_embedding_service,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+
+@pytest.fixture
+def test_rag_service(
+    test_retrieval_service: RetrievalService,
+    mock_gemini_service: MockGeminiService,
+) -> RAGService:
+    """Fixture providing an end-to-end RAGService with mocked generation."""
+    return RAGService(
+        retrieval_service=test_retrieval_service,
+        prompt_service=PromptService(),
+        gemini_service=mock_gemini_service,
     )
 
 

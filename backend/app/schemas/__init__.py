@@ -1,5 +1,10 @@
 """Pydantic schemas package for DocuMind AI."""
 
+from app.schemas.chat import (
+    ChatQueryRequest,
+    ChatQueryResponse,
+    CitationSource,
+)
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentListResponse,
@@ -14,4 +19,7 @@ __all__ = [
     "DocumentListResponse",
     "DocumentDeleteResponse",
     "TextChunk",
+    "ChatQueryRequest",
+    "ChatQueryResponse",
+    "CitationSource",
 ]

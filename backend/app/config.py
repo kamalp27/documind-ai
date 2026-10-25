@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base backend directory
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # Project Metadata
     PROJECT_NAME: str = "DocuMind AI"
-    VERSION: str = "0.2.0"
+    VERSION: str = "0.3.0"
     DESCRIPTION: str = "AI-Powered Document Question Answering & Semantic RAG System"
     API_V1_STR: str = "/api/v1"
 
@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIR: str = "data/chroma"
     DOCUMENTS_METADATA_FILE: str = "data/documents_metadata.json"
     CHROMA_COLLECTION_NAME: str = "documind_documents"
+
+    # Gemini API & RAG Configuration
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    RAG_TOP_K: int = 4
+    RAG_RELEVANCE_THRESHOLD: float = 0.75  # Max cosine distance (smaller distance = higher relevance)
+    MAX_QUERY_LENGTH: int = 1000
+    MAX_CONTEXT_CHARS: int = 12000
 
     @property
     def cors_origins_list(self) -> List[str]:

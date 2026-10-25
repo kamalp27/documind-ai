@@ -11,7 +11,7 @@ logger = logging.getLogger("documind.vector_store")
 
 
 class ChromaVectorStore:
-    """Manages persistent vector embedding storage and retrieval using ChromaDB."""
+    """Manages persistent vector embedding storage, retrieval, and deletion using ChromaDB."""
 
     def __init__(
         self,
@@ -90,6 +90,44 @@ class ChromaVectorStore:
             logger.error("Error upserting chunks into ChromaDB: %s", exc, exc_info=True)
             raise StorageException(
                 "Failed to store document embeddings in vector database.",
+                details={"error": str(exc)},
+            )
+
+    def query_similar_chunks(
+        self,
+        query_embedding: List[float],
+        n_results: int = 4,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Query nearest neighbor chunks in ChromaDB by cosine distance.
+
+        Note on Cosine Distance in ChromaDB:
+            distance = 1 - cosine_similarity.
+            Smaller distance values indicate higher semantic similarity.
+        """
+        collection = self._get_collection()
+        total_count = collection.count()
+        if total_count == 0:
+            return {
+                "ids": [[]],
+                "documents": [[]],
+                "metadatas": [[]],
+                "distances": [[]],
+            }
+
+        actual_n = max(1, min(n_results, total_count))
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=actual_n,
+                where=where,
+                include=["documents", "metadatas", "distances"],
+            )
+            return results
+        except Exception as exc:
+            logger.error("Error querying ChromaDB: %s", exc, exc_info=True)
+            raise StorageException(
+                "Failed to query vector database.",
                 details={"error": str(exc)},
             )
 

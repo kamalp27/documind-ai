@@ -25,6 +25,13 @@ class FileValidationException(DocuMindException):
         super().__init__(message=message, status_code=status_code, details=details)
 
 
+class QueryValidationException(DocuMindException):
+    """Raised when a user chat query fails validation."""
+
+    def __init__(self, message: str, status_code: int = 400, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message=message, status_code=status_code, details=details)
+
+
 class DocumentProcessingException(DocuMindException):
     """Raised when document extraction or chunking encounters an unrecoverable error."""
 
@@ -59,6 +66,23 @@ class StorageException(DocuMindException):
 
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(message=message, status_code=500, details=details)
+
+
+class MissingAPIKeyException(DocuMindException):
+    """Raised when Gemini API key is missing or blank."""
+
+    def __init__(
+        self,
+        message: str = "Gemini API key is not configured. Please set GEMINI_API_KEY in your backend/.env file.",
+    ):
+        super().__init__(message=message, status_code=500, details={"configuration": "GEMINI_API_KEY"})
+
+
+class GeminiServiceException(DocuMindException):
+    """Raised when Gemini model inference fails, encounters rate limiting, or returns blocked content."""
+
+    def __init__(self, message: str, status_code: int = 502, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message=message, status_code=status_code, details=details)
 
 
 class RAGServiceException(DocuMindException):
