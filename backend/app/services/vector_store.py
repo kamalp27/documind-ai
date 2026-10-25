@@ -144,6 +144,11 @@ class ChromaVectorStore:
                 details={"doc_id": doc_id, "error": str(exc)},
             )
 
+    def count(self) -> int:
+        """Return the total number of chunks across all documents."""
+        collection = self._get_collection()
+        return collection.count()
+
     def get_chunk_count_for_document(self, doc_id: str) -> int:
         """Count the number of chunks stored for a specific document."""
         collection = self._get_collection()

@@ -54,7 +54,7 @@ def test_retrieval_with_indexed_chunks(
         ),
     ]
     # Synthetic vectors that match mock embedding generator pattern
-    embeddings = [[0.05 * (i % 10) for _ in range(384)] for i in range(2)]
+    embeddings = [[(0.05 * (i % 10) + 0.1) for _ in range(384)] for i in range(2)]
     test_vector_store.add_chunks(chunks, embeddings)
 
     # 3. Retrieve
@@ -114,7 +114,7 @@ def test_retrieval_filter_by_document_id(
             char_count=42,
         ),
     ]
-    embeddings = [[0.05 * (i % 10) for _ in range(384)] for i in range(2)]
+    embeddings = [[(0.05 * (i % 10) + 0.1) for _ in range(384)] for i in range(2)]
     test_vector_store.add_chunks(chunks, embeddings)
 
     # Filter for doc-B only

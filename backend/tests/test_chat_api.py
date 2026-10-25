@@ -12,17 +12,6 @@ from app.services.rag_service import RAGService, get_rag_service
 from app.services.retrieval_service import RetrievalService
 
 
-@pytest.fixture
-def client_with_mock_rag(
-    test_document_service: DocumentService,
-    test_rag_service: RAGService,
-):
-    """TestClient configured with isolated storage, mock embeddings, and mock Gemini generation."""
-    app.dependency_overrides[get_document_service] = lambda: test_document_service
-    app.dependency_overrides[get_rag_service] = lambda: test_rag_service
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
 
 
 def test_chat_query_empty_question(client_with_mock_rag: TestClient):

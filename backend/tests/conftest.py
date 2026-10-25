@@ -30,8 +30,8 @@ class MockEmbeddingService(EmbeddingService):
     def embed_texts(self, texts):
         if not texts:
             return []
-        # Return deterministic synthetic 384-dim float vectors
-        return [[0.05 * (i % 10) for _ in range(384)] for i, _ in enumerate(texts)]
+        # Return deterministic synthetic 384-dim float vectors with positive non-zero norm
+        return [[(0.05 * (i % 10) + 0.1) for _ in range(384)] for i, _ in enumerate(texts)]
 
 
 class MockGeminiService(GeminiService):
@@ -164,3 +164,19 @@ def blank_pdf_bytes() -> bytes:
     pdf_bytes = doc.tobytes()
     doc.close()
     return pdf_bytes
+
+
+@pytest.fixture
+def client_with_mock_rag(
+    test_document_service: DocumentService,
+    test_rag_service: RAGService,
+) -> Generator[TestClient, None, None]:
+    """TestClient configured with isolated storage, mock embeddings, and mock Gemini generation."""
+    from app.services.document_service import get_document_service
+    from app.services.rag_service import get_rag_service
+
+    app.dependency_overrides[get_document_service] = lambda: test_document_service
+    app.dependency_overrides[get_rag_service] = lambda: test_rag_service
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.clear()

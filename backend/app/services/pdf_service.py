@@ -29,7 +29,7 @@ def sanitize_filename(filename: str) -> str:
     if not cleaned or cleaned.startswith("."):
         return "document.pdf"
 
-    if not cleaned.lower().endswith(".pdf"):
+    if "." not in cleaned:
         cleaned += ".pdf"
 
     return cleaned
