@@ -107,4 +107,63 @@ describe("ChatView", () => {
     });
     expect(screen.getByText(/No document passages exceeded the semantic relevance threshold/i)).toBeInTheDocument();
   });
+
+  it("renders inline citations as interactive buttons that open citation drawer", async () => {
+    const mockQueryResponse = {
+      answer: "Key finding is supported by [1] and [Source 2].",
+      sources: [
+        {
+          source_id: 1,
+          document_id: "doc-1",
+          filename: "spec.pdf",
+          page_numbers: [2],
+          excerpt: "Decoupled FastAPI backend and React frontend.",
+          similarity_score: 0.92,
+        },
+        {
+          source_id: 2,
+          document_id: "doc-2",
+          filename: "benchmarks.pdf",
+          page_numbers: [1],
+          excerpt: "High retrieval accuracy.",
+          similarity_score: 0.85,
+        },
+      ],
+      insufficient_evidence: false,
+      model_used: "gemini-3.8-flash",
+      request_id: "req-inline-test",
+    };
+
+    vi.spyOn(apiClient, "queryChat").mockResolvedValueOnce(mockQueryResponse);
+    const citationSpy = vi.fn();
+
+    render(
+      <ChatView
+        documents={sampleDocs}
+        selectedDocId={null}
+        onSelectDoc={vi.fn()}
+        onOpenCitation={citationSpy}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask a question/i);
+    fireEvent.change(textarea, { target: { value: "Where is this documented?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Key finding is supported by/i)).toBeInTheDocument();
+    });
+
+    // Click inline [1] button
+    const inline1 = screen.getByRole("button", { name: /View citation \[1\] from spec.pdf/i });
+    expect(inline1).toBeInTheDocument();
+    fireEvent.click(inline1);
+    expect(citationSpy).toHaveBeenCalledWith(mockQueryResponse.sources[0]);
+
+    // Click inline [Source 2] button
+    const inline2 = screen.getByRole("button", { name: /View citation \[2\] from benchmarks.pdf/i });
+    expect(inline2).toBeInTheDocument();
+    fireEvent.click(inline2);
+    expect(citationSpy).toHaveBeenCalledWith(mockQueryResponse.sources[1]);
+  });
 });

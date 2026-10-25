@@ -14,6 +14,7 @@ import { apiClient, ApiError } from "../../services/api";
 import { ChatMessage, CitationSource, DocumentMetadata } from "../../types";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { MarkdownMessage } from "./MarkdownMessage";
 
 interface ChatViewProps {
   documents: DocumentMetadata[];
@@ -330,9 +331,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 gap: "0.75rem",
               }}
             >
-              <div style={{ fontSize: "0.9375rem", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {msg.content}
-              </div>
+              {msg.role === "assistant" && !msg.isError ? (
+                <MarkdownMessage
+                  content={msg.content}
+                  sources={msg.sources}
+                  onOpenCitation={onOpenCitation}
+                />
+              ) : (
+                <div style={{ fontSize: "0.9375rem", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {msg.content}
+                </div>
+              )}
 
               {/* Insufficient Evidence Notice */}
               {msg.insufficient_evidence && (
