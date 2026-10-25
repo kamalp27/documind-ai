@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.api_router import api_router
 from app.config import get_settings
 from app.core.exceptions import DocuMindException
 
@@ -84,3 +85,7 @@ async def health_check() -> Dict[str, Any]:
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
+
+# Mount API v1 Routers
+app.include_router(api_router, prefix=settings.API_V1_STR)

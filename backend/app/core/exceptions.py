@@ -18,10 +18,28 @@ class DocuMindException(Exception):
         self.details = details or {}
 
 
+class FileValidationException(DocuMindException):
+    """Raised when an uploaded file fails validation (size, extension, signature)."""
+
+    def __init__(self, message: str, status_code: int = 400, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message=message, status_code=status_code, details=details)
+
+
 class DocumentProcessingException(DocuMindException):
-    """Raised when document extraction or chunking encounters an error."""
+    """Raised when document extraction or chunking encounters an unrecoverable error."""
 
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message=message, status_code=422, details=details)
+
+
+class ScannedDocumentException(DocuMindException):
+    """Raised when a PDF contains no extractable text (e.g. scanned image)."""
+
+    def __init__(
+        self,
+        message: str = "This document appears to be a scanned image with no extractable text. OCR is not supported in this phase.",
+        details: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(message=message, status_code=422, details=details)
 
 
@@ -34,6 +52,13 @@ class DocumentNotFoundException(DocuMindException):
             status_code=404,
             details={"document_id": doc_id},
         )
+
+
+class StorageException(DocuMindException):
+    """Raised when persistent storage or vector store encounters an error."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message=message, status_code=500, details=details)
 
 
 class RAGServiceException(DocuMindException):

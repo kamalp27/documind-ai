@@ -1,9 +1,13 @@
 """Application configuration management using Pydantic Settings."""
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Union
-from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Base backend directory
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -18,7 +22,7 @@ class Settings(BaseSettings):
 
     # Project Metadata
     PROJECT_NAME: str = "DocuMind AI"
-    VERSION: str = "0.1.0"
+    VERSION: str = "0.2.0"
     DESCRIPTION: str = "AI-Powered Document Question Answering & Semantic RAG System"
     API_V1_STR: str = "/api/v1"
 
@@ -33,6 +37,20 @@ class Settings(BaseSettings):
     # CORS Configuration
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Document Ingestion & Chunking
+    MAX_UPLOAD_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB default
+    CHUNK_SIZE: int = 800
+    CHUNK_OVERLAP: int = 120
+
+    # Embeddings
+    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Storage Paths (relative to backend root)
+    DATA_DIR: str = "data"
+    CHROMA_PERSIST_DIR: str = "data/chroma"
+    DOCUMENTS_METADATA_FILE: str = "data/documents_metadata.json"
+    CHROMA_COLLECTION_NAME: str = "documind_documents"
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Convert comma-separated CORS_ORIGINS string to a clean list of URLs."""
@@ -45,6 +63,25 @@ class Settings(BaseSettings):
                 if origin.strip()
             ]
         return ["*"]
+
+    @property
+    def data_dir_path(self) -> Path:
+        """Absolute path to the data storage directory."""
+        path = BASE_DIR / self.DATA_DIR
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def chroma_dir_path(self) -> Path:
+        """Absolute path to ChromaDB persistence directory."""
+        path = BASE_DIR / self.CHROMA_PERSIST_DIR
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def metadata_file_path(self) -> Path:
+        """Absolute path to document metadata JSON store."""
+        return BASE_DIR / self.DOCUMENTS_METADATA_FILE
 
 
 @lru_cache
