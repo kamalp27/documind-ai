@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Environment and Secrets
+.env
+*.env
+!.env.example
+
+# Local Data and Persistence
+backend/data/
+data/
+*.sqlite3
+*.chroma
+
+# Testing and Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend (for future phases)
+node_modules/
+dist/
+.vite/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+.vscode/
+.idea/
