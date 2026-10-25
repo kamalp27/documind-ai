@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Gemini API & RAG Configuration
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     RAG_TOP_K: int = 4
     RAG_RELEVANCE_THRESHOLD: float = 0.75  # Max cosine distance (smaller distance = higher relevance)
     MAX_QUERY_LENGTH: int = 1000
