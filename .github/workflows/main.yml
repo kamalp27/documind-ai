@@ -38,6 +38,7 @@ jobs:
         run: npm run build
         env:
           GITHUB_PAGES: true
+          VITE_API_BASE_URL: https://documind-ai-oltf.onrender.com
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
