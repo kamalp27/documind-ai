@@ -123,4 +123,32 @@ describe("MarkdownMessage Component", () => {
     // It should be rendered harmlessly as text
     expect(container).toHaveTextContent("<script>alert('xss')</script>");
   });
+
+  it("renders concise specific answer with direct opening and inline citation", () => {
+    const onOpen = vi.fn();
+    const content = "Kamal S. Patil is a Computer Engineering student [1] specializing in React and Python.";
+    render(<MarkdownMessage content={content} sources={mockSources} onOpenCitation={onOpen} />);
+
+    const citeBtn = screen.getByRole("button", { name: /View citation \[1\] from system_architecture.pdf/i });
+    expect(citeBtn).toBeInTheDocument();
+    expect(screen.getByText(/Kamal S\. Patil is a Computer Engineering student/)).toBeInTheDocument();
+  });
+
+  it("renders broad structured answer with headings, bullet lists, and citations", () => {
+    const onOpen = vi.fn();
+    const content =
+      "### Technical Skills\n- Python and TypeScript [1]\n- React and FastAPI [2]\n\n### Education\n- Bachelor of Engineering [1]";
+    render(<MarkdownMessage content={content} sources={mockSources} onOpenCitation={onOpen} />);
+
+    expect(screen.getByRole("heading", { level: 3, name: "Technical Skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Education" })).toBeInTheDocument();
+    expect(screen.getByText(/Python and TypeScript/)).toBeInTheDocument();
+    expect(screen.getByText(/React and FastAPI/)).toBeInTheDocument();
+
+    const cite1Btn = screen.getAllByRole("button", { name: /View citation \[1\] from system_architecture.pdf/i });
+    expect(cite1Btn.length).toBe(2);
+
+    const cite2Btn = screen.getByRole("button", { name: /View citation \[2\] from performance_spec.pdf/i });
+    expect(cite2Btn).toBeInTheDocument();
+  });
 });

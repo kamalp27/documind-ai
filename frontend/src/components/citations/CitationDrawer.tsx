@@ -24,11 +24,6 @@ export const CitationDrawer: React.FC<CitationDrawerProps> = ({ source, onClose 
     }
   };
 
-  const similarityPercentage =
-    source.similarity_score != null
-      ? `${Math.round(source.similarity_score * 100)}%`
-      : null;
-
   return (
     <div
       style={{
@@ -73,9 +68,13 @@ export const CitationDrawer: React.FC<CitationDrawerProps> = ({ source, onClose 
             <Badge variant="accent" size="md">
               Source [{source.source_id}]
             </Badge>
-            {similarityPercentage && (
-              <Badge variant="success" size="sm">
-                {similarityPercentage} Match
+            {source.similarity_score != null && (
+              <Badge
+                variant="accent"
+                size="sm"
+                title="Cosine similarity score (0.00 to 1.00) in all-MiniLM-L6-v2 vector space (higher indicates greater semantic affinity)"
+              >
+                Similarity: {source.similarity_score.toFixed(2)}
               </Badge>
             )}
           </div>
@@ -186,7 +185,12 @@ export const CitationDrawer: React.FC<CitationDrawerProps> = ({ source, onClose 
               lineHeight: 1.5,
             }}
           >
-            <strong>Grounded Verification:</strong> This passage was retrieved directly from the vector database using cosine similarity over extracted PDF pages.
+            <strong>Grounded Verification:</strong> This passage was retrieved directly from the vector database using semantic similarity over extracted PDF pages.
+            {source.similarity_score != null && (
+              <div style={{ marginTop: "0.35rem", color: "var(--text-muted)" }}>
+                Cosine similarity score: <strong style={{ color: "var(--accent-primary)" }}>{source.similarity_score.toFixed(4)}</strong> (typical passage relevance range: 0.20 – 0.60).
+              </div>
+            )}
           </div>
         </div>
       </div>

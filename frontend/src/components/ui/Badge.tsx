@@ -6,6 +6,7 @@ interface BadgeProps {
   size?: "sm" | "md";
   className?: string;
   onClick?: () => void;
+  title?: string;
 }
 
 export const Badge: React.FC<BadgeProps> = ({
@@ -14,6 +15,7 @@ export const Badge: React.FC<BadgeProps> = ({
   size = "md",
   className = "",
   onClick,
+  title,
 }) => {
   const baseStyle: React.CSSProperties = {
     display: "inline-flex",
@@ -64,6 +66,7 @@ export const Badge: React.FC<BadgeProps> = ({
       style={{ ...baseStyle, ...sizeStyles[size], ...variantStyles[variant] }}
       className={className}
       onClick={onClick}
+      title={title}
     >
       {children}
     </span>

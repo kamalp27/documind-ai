@@ -442,3 +442,158 @@ def test_rag_service_conclusions_on_resume_returns_insufficient_evidence(
     assert response.sources == []
     assert response.model_used is None
 
+
+def test_prompt_builder_conciseness_and_structure_directives():
+    """Verify prompt builder instructs the LLM on opening-sentence directness, broad answer structure, and inline citation syntax."""
+    service = PromptService()
+    passages = [
+        RetrievedPassage(
+            chunk_id="chunk-spec-1",
+            doc_id="doc-spec",
+            filename="candidate_profile.pdf",
+            page_numbers=[1],
+            text="Kamal S. Patil is a Computer Engineering student specializing in full-stack AI development.",
+            distance=0.15,
+            similarity_score=0.85,
+        ),
+    ]
+
+    system_instruction, user_content, sources = service.build_prompt(
+        question="What is the candidate's field of study?",
+        passages=passages,
+    )
+
+    # System instruction directives
+    assert "ANSWER CONCISENESS & STRUCTURE" in system_instruction
+    assert "direct, concise answer in the opening sentence" in system_instruction
+    assert "avoid \"Based on the provided documents..." in system_instruction
+    assert "Markdown headings (### Section) and bullet points (- Item)" in system_instruction
+    assert "INLINE CITATION REQUIREMENT" in system_instruction
+    assert "Only cite sources that were provided" in system_instruction
+    assert "INSUFFICIENT EVIDENCE REFUSAL" in system_instruction
+
+    # User content instructions
+    assert "User Question: What is the candidate's field of study?" in user_content
+    assert "inline citations (e.g., [1], [2])" in user_content
+    assert "direct and concise answer in the first sentence" in user_content
+    assert "clear Markdown headings and bullet points" in user_content
+    assert "The uploaded documents do not contain sufficient information to answer this question." in user_content
+
+
+def test_prompt_builder_citation_mapping_integrity():
+    """Verify that PromptService strictly maps passages to sequential source tags and matching CitationSources without phantoms."""
+    service = PromptService()
+    passages = [
+        RetrievedPassage(
+            chunk_id="chunk-map-1",
+            doc_id="doc-first",
+            filename="alpha_specs.pdf",
+            page_numbers=[1, 2],
+            text="Alpha specs detail vector database architecture and latency profiles.",
+            distance=0.20,
+            similarity_score=0.80,
+        ),
+        RetrievedPassage(
+            chunk_id="chunk-map-2",
+            doc_id="doc-second",
+            filename="beta_manual.pdf",
+            page_numbers=[10],
+            text="Beta manual outlines multi-document isolation and tenant boundary enforcement.",
+            distance=0.25,
+            similarity_score=0.75,
+        ),
+    ]
+
+    _, user_content, sources = service.build_prompt(
+        question="Explain architecture and tenant boundaries.",
+        passages=passages,
+    )
+
+    # Exactly two sources mapped
+    assert len(sources) == 2
+    assert sources[0].source_id == 1
+    assert sources[0].document_id == "doc-first"
+    assert sources[0].filename == "alpha_specs.pdf"
+    assert sources[0].page_numbers == [1, 2]
+    assert sources[0].similarity_score == 0.80
+
+    assert sources[1].source_id == 2
+    assert sources[1].document_id == "doc-second"
+    assert sources[1].filename == "beta_manual.pdf"
+    assert sources[1].page_numbers == [10]
+    assert sources[1].similarity_score == 0.75
+
+    # Context tag headers in user content must match source IDs exactly
+    assert "[Source 1] (Document: alpha_specs.pdf, Page: 1, 2)" in user_content
+    assert "[Source 2] (Document: beta_manual.pdf, Page: 10)" in user_content
+    assert "[Source 3]" not in user_content
+
+
+def test_rag_service_answers_with_structured_citations(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+    mock_gemini_service,
+):
+    """Verify end-to-end RAGService returns grounded answers with mapped citation sources when passages are relevant."""
+    from app.schemas.chat import ChatQueryRequest
+    from app.services.embedding_service import EmbeddingService
+    from app.services.rag_service import RAGService
+
+    doc_meta = DocumentMetadata(
+        document_id="doc-qa",
+        filename="project_overview.pdf",
+        file_size_bytes=1024,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T12:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="chunk-qa-1",
+        doc_id="doc-qa",
+        filename="project_overview.pdf",
+        text="Kamal S. Patil developed DocuMind AI using FastAPI, ChromaDB, and React.",
+        page_number=1,
+        chunk_index=0,
+        char_count=73,
+    )
+
+    class ControlledQAEmbeddingService(EmbeddingService):
+        def __init__(self):
+            super().__init__(model_name="controlled-qa-mock")
+
+        def embed_texts(self, texts):
+            return [[1.0] + [0.0] * 383 for _ in texts]
+
+    controlled_emb = ControlledQAEmbeddingService()
+    test_vector_store.add_chunks([chunk], controlled_emb.embed_texts([chunk.text]))
+
+    # Configure mock gemini to return concise answer with citation [1]
+    mock_gemini_service.mock_answer = "Kamal S. Patil developed DocuMind AI [1]."
+
+    rag_service = RAGService(
+        retrieval_service=RetrievalService(
+            embedding_service=controlled_emb,
+            vector_store=test_vector_store,
+            metadata_store=test_metadata_store,
+        ),
+        prompt_service=PromptService(),
+        gemini_service=mock_gemini_service,
+    )
+
+    request = ChatQueryRequest(
+        question="Who developed DocuMind AI?",
+        document_ids=["doc-qa"],
+    )
+    response = rag_service.answer_query(request)
+
+    assert response.insufficient_evidence is False
+    assert "[1]" in response.answer
+    assert len(response.sources) == 1
+    assert response.sources[0].source_id == 1
+    assert response.sources[0].filename == "project_overview.pdf"
+    assert response.sources[0].page_numbers == [1]
+    assert response.sources[0].similarity_score == 1.0
+
+

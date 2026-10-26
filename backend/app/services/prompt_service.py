@@ -35,11 +35,19 @@ STRICT OPERATIONAL & SECURITY RULES:
    Do NOT assume, infer, extrapolate, or use outside knowledge.
    Never invent statistics, quotations, or citations.
 
-3. INLINE CITATION REQUIREMENT:
+3. ANSWER CONCISENESS & STRUCTURE:
+   - For specific factual questions (e.g., questions asking for names, dates, skills, metrics, or specific facts):
+     Provide a direct, concise answer in the opening sentence. Do NOT include conversational filler, meta-announcements, or generic preamble (e.g., avoid "Based on the provided documents...", "According to the excerpts...", "Sure, here is...").
+   - For broad or summary questions (e.g., questions asking for an overview, summary, key takeaways, or list of items):
+     Structure the answer logically using clear Markdown headings (### Section) and bullet points (- Item) for readability.
+   - Maintain a neutral, professional, and informative tone throughout.
+
+4. INLINE CITATION REQUIREMENT:
    Every factual claim in your answer MUST cite its source using bracketed numbers corresponding to the source tags, e.g., [1], [2].
    If multiple sources support a statement, cite all applicable ones, e.g., [1][2].
+   Only cite sources that were provided in <document_context>. Never generate citations for unretrieved or phantom source numbers.
 
-4. INSUFFICIENT EVIDENCE REFUSAL:
+5. INSUFFICIENT EVIDENCE REFUSAL:
    If the provided excerpts do not contain enough information to answer the question directly and factually, state:
    "The uploaded documents do not contain sufficient information to answer this question."
    Do not guess, apologize profusely, or hallucinate plausible answers.
@@ -106,8 +114,11 @@ class PromptService:
             f"{context_text}\n"
             f"</document_context>\n\n"
             f"User Question: {cleaned_question}\n\n"
-            f"Answer the question using only the verified facts from <document_context> with inline [Source #] citations. "
-            f"If the context does not contain the answer, respond with the required insufficient evidence message."
+            f"Instructions:\n"
+            f"- Answer the question using only verified facts from <document_context> with inline citations (e.g., [1], [2]).\n"
+            f"- For specific questions, provide a direct and concise answer in the first sentence without conversational filler.\n"
+            f"- For broad or summary questions, organize your response with clear Markdown headings and bullet points.\n"
+            f"- If the context does not contain sufficient facts to answer the question, state: \"The uploaded documents do not contain sufficient information to answer this question.\""
         )
 
         return SYSTEM_INSTRUCTION, user_content, citation_sources
