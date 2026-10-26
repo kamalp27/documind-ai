@@ -29,13 +29,17 @@ class ChromaVectorStore:
         if self._collection is None:
             try:
                 import chromadb
+                from chromadb.config import Settings as ChromaSettings
 
                 logger.info(
                     "Connecting to persistent ChromaDB at '%s' with collection '%s'",
                     self.persist_dir,
                     self.collection_name,
                 )
-                self._client = chromadb.PersistentClient(path=str(self.persist_dir))
+                self._client = chromadb.PersistentClient(
+                    path=str(self.persist_dir),
+                    settings=ChromaSettings(anonymized_telemetry=False),
+                )
                 self._collection = self._client.get_or_create_collection(
                     name=self.collection_name,
                     metadata={"hnsw:space": "cosine"},

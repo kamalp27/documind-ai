@@ -1,4 +1,4 @@
-"""Lazy-loading Sentence Transformers embedding service."""
+"""Lightweight ONNX-powered embedding service for all-MiniLM-L6-v2."""
 
 import logging
 from typing import List, Optional
@@ -9,7 +9,12 @@ logger = logging.getLogger("documind.embeddings")
 
 
 class EmbeddingService:
-    """Provides vector embeddings using Sentence Transformers with lazy loading."""
+    """Provides vector embeddings using ONNX Runtime with lazy loading.
+
+    Uses ChromaDB's built-in ONNXMiniLM_L6_V2 engine for all-MiniLM-L6-v2,
+    producing identical 384-dimensional dense vectors to Sentence Transformers
+    while eliminating PyTorch to fit comfortably within 512 MB memory constraints.
+    """
 
     def __init__(self, model_name: Optional[str] = None):
         self.settings = get_settings()
@@ -17,14 +22,14 @@ class EmbeddingService:
         self._model = None
 
     def _get_model(self):
-        """Lazily load the SentenceTransformer model on first usage."""
+        """Lazily load the ONNX embedding model on first usage."""
         if self._model is None:
             try:
-                logger.info("Lazily loading embedding model '%s'...", self.model_name)
-                from sentence_transformers import SentenceTransformer
+                logger.info("Lazily loading lightweight ONNX embedding model '%s'...", self.model_name)
+                from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
-                self._model = SentenceTransformer(self.model_name)
-                logger.info("Embedding model '%s' loaded successfully.", self.model_name)
+                self._model = ONNXMiniLM_L6_V2()
+                logger.info("ONNX embedding model '%s' loaded successfully.", self.model_name)
             except Exception as exc:
                 logger.error("Failed to load embedding model '%s': %s", self.model_name, exc, exc_info=True)
                 raise DocuMindException(
@@ -41,15 +46,19 @@ class EmbeddingService:
             texts: List of text passages.
 
         Returns:
-            List of float vector embeddings.
+            List of 384-dimensional float vector embeddings.
         """
         if not texts:
             return []
 
         model = self._get_model()
         try:
-            embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-            return [vec.tolist() for vec in embeddings]
+            if callable(model) and not hasattr(model, "encode"):
+                raw_embeddings = model(texts)
+                return [vec.tolist() if hasattr(vec, "tolist") else list(vec) for vec in raw_embeddings]
+            else:
+                embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+                return [vec.tolist() if hasattr(vec, "tolist") else list(vec) for vec in embeddings]
         except Exception as exc:
             logger.error("Error generating embeddings: %s", exc, exc_info=True)
             raise DocuMindException(
