@@ -3,7 +3,8 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base backend directory
@@ -55,9 +56,17 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-3.8-flash"
     RAG_TOP_K: int = 4
-    RAG_RELEVANCE_THRESHOLD: float = 0.75  # Max cosine distance (smaller distance = higher relevance)
+    RAG_RELEVANCE_THRESHOLD: float = 0.85  # Max cosine distance (smaller distance = higher relevance)
     MAX_QUERY_LENGTH: int = 1000
     MAX_CONTEXT_CHARS: int = 12000
+
+    @field_validator("RAG_RELEVANCE_THRESHOLD", mode="before")
+    @classmethod
+    def _validate_threshold(cls, v: Any) -> float:
+        """Calibrate legacy 0.75 default to 0.85 without modifying local .env."""
+        if v is None or v == 0.75 or v == "0.75":
+            return 0.85
+        return float(v)
 
     @property
     def cors_origins_list(self) -> List[str]:

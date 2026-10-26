@@ -260,5 +260,185 @@ def test_retrieval_unrelated_query_below_threshold(
         question="What is the traditional recipe for authentic Italian spaghetti carbonara?",
         top_k=2,
     )
-    # Cosine distance should be > 0.75, hence 0 passages meet the threshold
+    # Cosine distance should be > 0.85, hence 0 passages meet the threshold
     assert len(unrelated_passages) == 0
+
+
+def test_retrieval_threshold_calibrated_to_0_85(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Verify that relevant resume queries with measured distances around 0.78-0.84 pass threshold under 0.85 calibration."""
+    import math
+    from app.services.embedding_service import EmbeddingService
+
+    doc_meta = DocumentMetadata(
+        document_id="doc-resume",
+        filename="resume.pdf",
+        file_size_bytes=2048,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T12:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="chunk-resume-1",
+        doc_id="doc-resume",
+        filename="resume.pdf",
+        text="Kamal S. Patil. Computer Engineering student. Skills: Python, Java, C++, React, Machine Learning.",
+        page_number=1,
+        chunk_index=0,
+        char_count=101,
+    )
+
+    class ControlledDistanceEmbeddingService(EmbeddingService):
+        def __init__(self):
+            super().__init__(model_name="controlled-mock")
+
+        def embed_texts(self, texts):
+            results = []
+            for t in texts:
+                if "Kamal S. Patil" in t:
+                    vec = [1.0] + [0.0] * 383
+                elif "skills" in t.lower() or "education" in t.lower():
+                    # Target distance 0.78 (measured natural distance for resume skills inquiry)
+                    cos_val = 1.0 - 0.78
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                elif "achievements" in t.lower():
+                    # Target distance 0.84 (measured natural distance for achievements inquiry)
+                    cos_val = 1.0 - 0.84
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                elif "carbonara" in t.lower() or "recipe" in t.lower():
+                    # Target distance 0.92 (unrelated recipe inquiry)
+                    cos_val = 1.0 - 0.92
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                elif "conclusions" in t.lower():
+                    # Target distance 0.8987 (conclusions inquiry against resume with no conclusions)
+                    cos_val = 1.0 - 0.8987
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                else:
+                    vec = [0.0, 1.0] + [0.0] * 382
+                results.append(vec)
+            return results
+
+    controlled_emb = ControlledDistanceEmbeddingService()
+    test_vector_store.add_chunks([chunk], controlled_emb.embed_texts([chunk.text]))
+
+    service = RetrievalService(
+        embedding_service=controlled_emb,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    # 1. Query with distance 0.78 (passes <= 0.85, whereas under old 0.75 it failed)
+    passages_skills = service.retrieve(
+        question="What are the candidate skills and education?",
+        document_ids=["doc-resume"],
+    )
+    assert len(passages_skills) == 1
+    assert passages_skills[0].doc_id == "doc-resume"
+    assert round(passages_skills[0].distance, 2) == 0.78
+    assert passages_skills[0].similarity_score == round(1.0 - 0.78, 4)
+
+    # 2. Query with distance 0.84 (passes <= 0.85)
+    passages_achievements = service.retrieve(
+        question="What are the candidate achievements?",
+        document_ids=["doc-resume"],
+    )
+    assert len(passages_achievements) == 1
+    assert round(passages_achievements[0].distance, 2) == 0.84
+
+    # 3. Unrelated query with distance 0.92 (rejected > 0.85)
+    passages_unrelated = service.retrieve(
+        question="What is the authentic recipe for Italian carbonara?",
+        document_ids=["doc-resume"],
+    )
+    assert len(passages_unrelated) == 0
+
+    # 4. Conclusion query on resume with distance 0.8987 (rejected > 0.85)
+    passages_conclusions = service.retrieve(
+        question="What are the main conclusions of this document?",
+        document_ids=["doc-resume"],
+    )
+    assert len(passages_conclusions) == 0
+
+
+def test_rag_service_conclusions_on_resume_returns_insufficient_evidence(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+    mock_gemini_service,
+):
+    """Verify end-to-end RAGService returns insufficient evidence when conclusion query distance on resume exceeds 0.85."""
+    import math
+    from app.schemas.chat import ChatQueryRequest
+    from app.services.embedding_service import EmbeddingService
+    from app.services.rag_service import RAGService
+
+    doc_meta = DocumentMetadata(
+        document_id="doc-resume-eval",
+        filename="resume.pdf",
+        file_size_bytes=2048,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T12:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="chunk-resume-eval-1",
+        doc_id="doc-resume-eval",
+        filename="resume.pdf",
+        text="Kamal S. Patil. Computer Engineering student. Skills: Python, Java, C++, React.",
+        page_number=1,
+        chunk_index=0,
+        char_count=82,
+    )
+
+    class ControlledConclusionEmbeddingService(EmbeddingService):
+        def __init__(self):
+            super().__init__(model_name="controlled-conclusion-mock")
+
+        def embed_texts(self, texts):
+            results = []
+            for t in texts:
+                if "Kamal S. Patil" in t:
+                    vec = [1.0] + [0.0] * 383
+                elif "conclusions" in t.lower():
+                    # Exact distance 0.8987 from empirical resume measurement
+                    cos_val = 1.0 - 0.8987
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                else:
+                    vec = [0.0, 1.0] + [0.0] * 382
+                results.append(vec)
+            return results
+
+    controlled_emb = ControlledConclusionEmbeddingService()
+    test_vector_store.add_chunks([chunk], controlled_emb.embed_texts([chunk.text]))
+
+    rag_service = RAGService(
+        retrieval_service=RetrievalService(
+            embedding_service=controlled_emb,
+            vector_store=test_vector_store,
+            metadata_store=test_metadata_store,
+        ),
+        prompt_service=PromptService(),
+        gemini_service=mock_gemini_service,
+    )
+
+    request = ChatQueryRequest(
+        question="What are the main conclusions of this document?",
+        document_ids=["doc-resume-eval"],
+    )
+    response = rag_service.answer_query(request)
+
+    assert response.insufficient_evidence is True
+    assert "not contain sufficient information" in response.answer.lower()
+    assert response.sources == []
+    assert response.model_used is None
+

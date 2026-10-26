@@ -28,6 +28,27 @@ describe("ChatView", () => {
     expect(screen.getByText(/Ask anything about your documents/i)).toBeInTheDocument();
   });
 
+  it("renders versatile starter prompt suggestions and populates input on click", () => {
+    render(
+      <ChatView
+        documents={sampleDocs}
+        selectedDocId={null}
+        onSelectDoc={vi.fn()}
+        onOpenCitation={vi.fn()}
+      />
+    );
+    const suggestion1 = screen.getByText("Summarize the key information in this document.");
+    expect(suggestion1).toBeInTheDocument();
+    expect(screen.getByText("What are the main topics and details covered?")).toBeInTheDocument();
+    expect(screen.getByText("What skills, facts, or important details are mentioned?")).toBeInTheDocument();
+
+    const textarea = screen.getByPlaceholderText(/Ask a question about your indexed documents/i) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("");
+
+    fireEvent.click(suggestion1);
+    expect(textarea.value).toBe("Summarize the key information in this document.");
+  });
+
   it("submits query, renders assistant response and citation badges", async () => {
     const mockQueryResponse = {
       answer: "The specification details a decoupled RAG architecture [1].",

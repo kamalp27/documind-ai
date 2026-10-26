@@ -63,6 +63,7 @@ def test_settings_properties():
     assert settings.API_V1_STR == "/api/v1"
     assert isinstance(settings.cors_origins_list, list)
     assert "http://localhost:5173" in settings.cors_origins_list
+    assert settings.RAG_RELEVANCE_THRESHOLD == 0.85
 
 
 def test_custom_domain_exception_handling():

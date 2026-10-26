@@ -295,7 +295,7 @@ def run_real_e2e_verification():
         document_ids=[doc_id],
         top_k=2,
     )
-    print(f"Unrelated query '{unrelated_q[:40]}...' retrieved {len(unrelated_passages)} passages (Expected 0 meeting <= 0.75 threshold).")
+    print(f"Unrelated query '{unrelated_q[:40]}...' retrieved {len(unrelated_passages)} passages (Expected 0 meeting <= {settings.RAG_RELEVANCE_THRESHOLD} threshold).")
     assert len(unrelated_passages) == 0, "Unrelated query was unexpectedly retrieved!"
 
     # Test end-to-end RAG response on unrelated query

@@ -219,9 +219,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   Suggested queries
                 </span>
                 {[
-                  "What are the main conclusions of this document?",
-                  "Summarize the key metrics and methodology.",
-                  "What risks or limitations are highlighted?",
+                  "Summarize the key information in this document.",
+                  "What are the main topics and details covered?",
+                  "What skills, facts, or important details are mentioned?",
                 ].map((prompt, idx) => (
                   <button
                     key={idx}
