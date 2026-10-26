@@ -54,8 +54,8 @@ class Settings(BaseSettings):
 
     # Gemini API & RAG Configuration
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-3.8-flash"
-    GEMINI_TIMEOUT_SECONDS: int = 20  # Explicit client-side timeout for model generation requests
+    GEMINI_MODEL: str = "gemini-3.6-flash"
+    GEMINI_TIMEOUT_SECONDS: int = 45  # Explicit client-side timeout for model generation requests
     RAG_TOP_K: int = 4
     RAG_RELEVANCE_THRESHOLD: float = 0.85  # Max cosine distance (smaller distance = higher relevance)
     MAX_QUERY_LENGTH: int = 1000

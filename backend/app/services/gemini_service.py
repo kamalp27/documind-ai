@@ -24,7 +24,7 @@ class GeminiService:
         self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
         self.model_name = model_name or settings.GEMINI_MODEL
         self.timeout_seconds = (
-            timeout_seconds if timeout_seconds is not None else getattr(settings, "GEMINI_TIMEOUT_SECONDS", 20)
+            timeout_seconds if timeout_seconds is not None else getattr(settings, "GEMINI_TIMEOUT_SECONDS", 45)
         )
         self.timeout_ms = int(self.timeout_seconds * 1000)
         self._client = None
@@ -80,7 +80,7 @@ class GeminiService:
         client = self._get_client()
 
         max_retries = 3
-        max_timeout_retries = 2  # Bounded to at most 1 retry on timeout to keep total request duration <= 42s
+        max_timeout_retries = 2  # Bounded to at most 1 retry on timeout to keep total request duration <= 91s
 
         for attempt in range(max_retries):
             try:
@@ -101,6 +101,7 @@ class GeminiService:
                         temperature=0.1,  # Low temperature minimizes hallucination
                         max_output_tokens=1024,
                         http_options=types.HttpOptions(timeout=self.timeout_ms),
+                        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
                     ),
                 )
 

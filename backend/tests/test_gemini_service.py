@@ -62,11 +62,14 @@ def test_gemini_successful_generation():
     assert result == "Based on [1], ChromaDB provides persistent vector search."
 
 
-def test_gemini_configures_20_second_timeout():
-    """Verify GeminiService configures http_options with 20000ms timeout on generation config."""
+def test_gemini_configures_45_second_timeout_and_low_thinking():
+    """Verify GeminiService configures model=gemini-3.6-flash, http_options with 45000ms timeout, and thinking_level=LOW."""
+    from google.genai import types
+
     service = GeminiService(api_key="valid-mock-key")
-    assert service.timeout_seconds == 20
-    assert service.timeout_ms == 20000
+    assert service.model_name == "gemini-3.6-flash"
+    assert service.timeout_seconds == 45
+    assert service.timeout_ms == 45000
 
     mock_client = MagicMock()
     mock_response = MagicMock()
@@ -78,10 +81,16 @@ def test_gemini_configures_20_second_timeout():
 
     # Inspect call args passed to models.generate_content
     call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert call_kwargs.get("model") == "gemini-3.6-flash"
     config = call_kwargs.get("config")
     assert config is not None
     assert config.http_options is not None
-    assert config.http_options.timeout == 20000
+    assert config.http_options.timeout == 45000
+    assert config.thinking_config is not None
+    assert (
+        config.thinking_config.thinking_level == types.ThinkingLevel.LOW
+        or config.thinking_config.thinking_level == "LOW"
+    )
 
 
 def test_gemini_timeout_raises_504_after_retry(monkeypatch):
@@ -92,7 +101,7 @@ def test_gemini_timeout_raises_504_after_retry(monkeypatch):
 
     service = GeminiService(api_key="valid-mock-key")
     mock_client = MagicMock()
-    mock_client.models.generate_content.side_effect = TimeoutError("The read operation timed out after 20.0s")
+    mock_client.models.generate_content.side_effect = TimeoutError("The read operation timed out after 45.0s")
 
     service._client = mock_client
 
@@ -100,7 +109,8 @@ def test_gemini_timeout_raises_504_after_retry(monkeypatch):
         service.generate_answer("System instruction", "User content")
 
     assert exc_info.value.status_code == 504
-    assert "timed out after 20 seconds" in exc_info.value.message
+    assert "timed out after 45 seconds" in exc_info.value.message
+    assert exc_info.value.details["timeout_seconds"] == 45
     # Bounded to at most 2 attempts (1 initial + 1 retry)
     assert mock_client.models.generate_content.call_count == 2
 
