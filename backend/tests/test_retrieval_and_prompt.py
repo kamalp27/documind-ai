@@ -597,3 +597,98 @@ def test_rag_service_answers_with_structured_citations(
     assert response.sources[0].similarity_score == 1.0
 
 
+def test_regression_summary_query_distance_reproduction(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+    monkeypatch,
+):
+    """Reproduce retrieval failure for summary queries:
+    A specific query with measured distance 0.6353 succeeds under both 0.75 and 0.85.
+    A summary query with measured distance 0.7613 fails under 0.75 (stale server state) but succeeds under 0.85.
+    """
+    import math
+    from app.services.embedding_service import EmbeddingService
+
+    doc_meta = DocumentMetadata(
+        document_id="doc-resume-diag",
+        filename="Resume 3.pdf",
+        file_size_bytes=111042,
+        total_pages=2,
+        total_chunks=6,
+        created_at="2026-10-26T14:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="chunk-resume-diag-1",
+        doc_id="doc-resume-diag",
+        filename="Resume 3.pdf",
+        text="Kamal S. Patil. Full-stack and Web3 engineer. Projects: Beatflow, Collaborative Canvas, BetterUpTime (Rust + React).",
+        page_number=1,
+        chunk_index=0,
+        char_count=118,
+    )
+
+    class ControlledDiagEmbeddingService(EmbeddingService):
+        def __init__(self):
+            super().__init__(model_name="controlled-diag-mock")
+
+        def embed_texts(self, texts):
+            results = []
+            for t in texts:
+                t_lower = t.lower()
+                if "beatflow" in t_lower or "betteruptime" in t_lower:
+                    # Document chunk baseline vector
+                    vec = [1.0] + [0.0] * 383
+                elif "programming languages" in t_lower:
+                    # Specific factual query: measured distance 0.6353 on Resume 3
+                    cos_val = 1.0 - 0.6353
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                elif "summarize the key information" in t_lower:
+                    # Summary query: measured distance 0.7613 on Resume 3
+                    cos_val = 1.0 - 0.7613
+                    sin_val = math.sqrt(1.0 - cos_val ** 2)
+                    vec = [cos_val, sin_val] + [0.0] * 382
+                else:
+                    vec = [0.0, 1.0] + [0.0] * 382
+                results.append(vec)
+            return results
+
+    controlled_emb = ControlledDiagEmbeddingService()
+    test_vector_store.add_chunks([chunk], controlled_emb.embed_texts([chunk.text]))
+
+    service = RetrievalService(
+        embedding_service=controlled_emb,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    # 1. Specific query (dist=0.6353) passes under both 0.75 and 0.85
+    monkeypatch.setattr(service.settings, "RAG_RELEVANCE_THRESHOLD", 0.75)
+    passages_lang_75 = service.retrieve(
+        question="What programming languages are mentioned in this document?",
+        document_ids=["doc-resume-diag"],
+    )
+    assert len(passages_lang_75) == 1
+    assert round(passages_lang_75[0].distance, 4) == 0.6353
+
+    # 2. Summary query (dist=0.7613) FAILS under stale server threshold (0.75)
+    passages_sum_75 = service.retrieve(
+        question="Summarize the key information in this document.",
+        document_ids=["doc-resume-diag"],
+    )
+    assert len(passages_sum_75) == 0  # Discarded because 0.7613 > 0.75
+
+    # 3. Summary query (dist=0.7613) SUCCEEDS under calibrated threshold (0.85)
+    monkeypatch.setattr(service.settings, "RAG_RELEVANCE_THRESHOLD", 0.85)
+    passages_sum_85 = service.retrieve(
+        question="Summarize the key information in this document.",
+        document_ids=["doc-resume-diag"],
+    )
+    assert len(passages_sum_85) == 1
+    assert round(passages_sum_85[0].distance, 4) == 0.7613
+    assert round(passages_sum_85[0].similarity_score, 4) == round(1.0 - 0.7613, 4)
+
+
+

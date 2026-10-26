@@ -18,10 +18,15 @@ class GeminiService:
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
     ):
         settings = get_settings()
         self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
         self.model_name = model_name or settings.GEMINI_MODEL
+        self.timeout_seconds = (
+            timeout_seconds if timeout_seconds is not None else getattr(settings, "GEMINI_TIMEOUT_SECONDS", 20)
+        )
+        self.timeout_ms = int(self.timeout_seconds * 1000)
         self._client = None
 
     def _get_client(self):
@@ -33,9 +38,17 @@ class GeminiService:
         if self._client is None:
             try:
                 from google import genai
+                from google.genai import types
 
-                self._client = genai.Client(api_key=self.api_key)
-                logger.info("Initialized Google GenAI client for model '%s'.", self.model_name)
+                self._client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(timeout=self.timeout_ms),
+                )
+                logger.info(
+                    "Initialized Google GenAI client for model '%s' (timeout=%ds).",
+                    self.model_name,
+                    self.timeout_seconds,
+                )
             except Exception as exc:
                 logger.error("Failed to initialize Google GenAI SDK: %s", exc, exc_info=True)
                 raise GeminiServiceException(
@@ -67,11 +80,19 @@ class GeminiService:
         client = self._get_client()
 
         max_retries = 3
+        max_timeout_retries = 2  # Bounded to at most 1 retry on timeout to keep total request duration <= 42s
+
         for attempt in range(max_retries):
             try:
                 from google.genai import types
 
-                logger.info("Sending grounded prompt to Gemini (%s) [attempt %d/%d]...", self.model_name, attempt + 1, max_retries)
+                logger.info(
+                    "Sending grounded prompt to Gemini (%s) [attempt %d/%d, timeout=%ds]...",
+                    self.model_name,
+                    attempt + 1,
+                    max_retries,
+                    self.timeout_seconds,
+                )
                 response = client.models.generate_content(
                     model=self.model_name,
                     contents=user_content,
@@ -79,6 +100,7 @@ class GeminiService:
                         system_instruction=system_instruction,
                         temperature=0.1,  # Low temperature minimizes hallucination
                         max_output_tokens=1024,
+                        http_options=types.HttpOptions(timeout=self.timeout_ms),
                     ),
                 )
 
@@ -98,6 +120,31 @@ class GeminiService:
             except Exception as exc:
                 err_str = str(exc)
                 logger.error("Gemini API invocation error on attempt %d: %s", attempt + 1, err_str)
+
+                # Check for client-side or gateway timeout
+                is_timeout = (
+                    "timeout" in err_str.lower()
+                    or "timed out" in err_str.lower()
+                    or "deadline" in err_str.lower()
+                    or "504" in err_str
+                    or isinstance(exc, TimeoutError)
+                )
+
+                if is_timeout:
+                    if attempt < max_timeout_retries - 1:
+                        logger.warning(
+                            "Gemini request timed out after %ds; retrying once (attempt %d/%d)...",
+                            self.timeout_seconds,
+                            attempt + 1,
+                            max_timeout_retries,
+                        )
+                        time.sleep(1.0)
+                        continue
+                    raise GeminiServiceException(
+                        f"The Gemini model request timed out after {self.timeout_seconds} seconds. Please try again.",
+                        status_code=504,
+                        details={"error_type": type(exc).__name__, "timeout_seconds": self.timeout_seconds},
+                    )
 
                 # Bounded retry strictly for transient 503 Service Unavailable / demand spikes
                 # Do NOT retry 400 (invalid request), 401/403 (auth/permissions), 404 (model missing), or 429 (quota exhausted)
