@@ -159,6 +159,19 @@ class ChromaVectorStore:
             logger.warning("Could not count chunks for doc_id '%s': %s", doc_id, exc)
             return 0
 
+    def get_chunks_for_document(self, doc_id: str) -> Dict[str, Any]:
+        """Retrieve stored chunks, metadata, and embeddings for a specific document ID."""
+        collection = self._get_collection()
+        try:
+            results = collection.get(
+                where={"doc_id": doc_id},
+                include=["documents", "metadatas", "embeddings"],
+            )
+            return results
+        except Exception as exc:
+            logger.error("Error retrieving chunks for doc_id '%s': %s", doc_id, exc, exc_info=True)
+            return {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
+
 
 _vector_store_instance: Optional[ChromaVectorStore] = None
 

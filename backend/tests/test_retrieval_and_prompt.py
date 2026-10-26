@@ -5,7 +5,7 @@ from app.core.exceptions import DocumentNotFoundException
 from app.schemas.document import DocumentMetadata, TextChunk
 from app.services.metadata_store import DocumentMetadataStore
 from app.services.prompt_service import PromptService
-from app.services.retrieval_service import RetrievedPassage, RetrievalService
+from app.services.retrieval_service import RetrievedPassage, RetrievalService, is_summary_query
 from app.services.vector_store import ChromaVectorStore
 
 
@@ -673,12 +673,19 @@ def test_regression_summary_query_distance_reproduction(
     assert len(passages_lang_75) == 1
     assert round(passages_lang_75[0].distance, 4) == 0.6353
 
-    # 2. Summary query (dist=0.7613) FAILS under stale server threshold (0.75)
+    # 2. Summary query (dist=0.7613) without document filter FAILS under threshold 0.75
+    passages_sum_unfiltered_75 = service.retrieve(
+        question="Summarize the key information in this document.",
+        document_ids=None,
+    )
+    assert len(passages_sum_unfiltered_75) == 0  # Discarded because 0.7613 > 0.75 and no single-doc fallback
+
+    # With single-document scoping under Phase 8.6, summary fallback triggers when distance exceeds threshold
     passages_sum_75 = service.retrieve(
         question="Summarize the key information in this document.",
         document_ids=["doc-resume-diag"],
     )
-    assert len(passages_sum_75) == 0  # Discarded because 0.7613 > 0.75
+    assert len(passages_sum_75) == 1
 
     # 3. Summary query (dist=0.7613) SUCCEEDS under calibrated threshold (0.85)
     monkeypatch.setattr(service.settings, "RAG_RELEVANCE_THRESHOLD", 0.85)
@@ -689,6 +696,447 @@ def test_regression_summary_query_distance_reproduction(
     assert len(passages_sum_85) == 1
     assert round(passages_sum_85[0].distance, 4) == 0.7613
     assert round(passages_sum_85[0].similarity_score, 4) == round(1.0 - 0.7613, 4)
+
+
+def test_is_summary_query_helper():
+    """Verify conservative intent detection for broad summary/overview queries."""
+    # Positive summary queries
+    assert is_summary_query("Summarize this document") is True
+    assert is_summary_query("Give me a summary") is True
+    assert is_summary_query("What is this document about?") is True
+    assert is_summary_query("what this document is about") is True
+    assert is_summary_query("Give me an overview") is True
+    assert is_summary_query("What are the key takeaways?") is True
+    assert is_summary_query("Summarize the key information in this document.") is True
+    assert is_summary_query("Can you give me a document outline?") is True
+    assert is_summary_query("tl;dr of this document") is True
+    assert is_summary_query("Provide a brief synopsis") is True
+    assert is_summary_query("What does this document discuss?") is True
+
+    # Negative specific queries (do not trigger merely because they contain 'document')
+    assert is_summary_query("What programming languages are mentioned in this document?") is False
+    assert is_summary_query("Who wrote this document?") is False
+    assert is_summary_query("When was this document created?") is False
+    assert is_summary_query("Does this document mention React?") is False
+    assert is_summary_query("What is the phone number on page 1?") is False
+    assert is_summary_query("How do I make an Italian carbonara?") is False
+    assert is_summary_query("Explain quantum computing") is False
+    assert is_summary_query("") is False
+    assert is_summary_query("   ") is False
+
+
+def _create_mock_controlled_embedding_service(chunk_baseline, query_map):
+    import math
+    from app.services.embedding_service import EmbeddingService
+
+    class MockControlledService(EmbeddingService):
+        def __init__(self):
+            super().__init__(model_name="mock-controlled")
+
+        def embed_texts(self, texts):
+            results = []
+            for t in texts:
+                t_lower = t.lower().strip()
+                matched = False
+                for q_key, target_dist in query_map.items():
+                    if q_key in t_lower:
+                        # Construct vector with exact cosine distance target_dist
+                        cos_val = max(-1.0, min(1.0, 1.0 - target_dist))
+                        sin_val = math.sqrt(max(0.0, 1.0 - cos_val ** 2))
+                        results.append([cos_val, sin_val] + [0.0] * 382)
+                        matched = True
+                        break
+                if not matched:
+                    results.append(chunk_baseline)
+            return results
+
+    return MockControlledService()
+
+
+def test_document_scoped_summary_fallback_triggers_for_single_document(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 1: Summary query with candidate distance > 0.85 triggers fallback for single document."""
+    doc_meta = DocumentMetadata(
+        document_id="doc-fallback-single",
+        filename="annual_report.pdf",
+        file_size_bytes=2048,
+        total_pages=2,
+        total_chunks=3,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunks = [
+        TextChunk(
+            chunk_id="doc-fallback-single_p1_c0",
+            doc_id="doc-fallback-single",
+            filename="annual_report.pdf",
+            text="Executive Summary: Our company achieved 40% year-over-year revenue growth in 2025.",
+            page_number=1,
+            chunk_index=0,
+            char_count=82,
+        ),
+        TextChunk(
+            chunk_id="doc-fallback-single_p1_c1",
+            doc_id="doc-fallback-single",
+            filename="annual_report.pdf",
+            text="Financial Highlights: Operating margins expanded by 300 basis points across all segments.",
+            page_number=1,
+            chunk_index=1,
+            char_count=89,
+        ),
+        TextChunk(
+            chunk_id="doc-fallback-single_p2_c2",
+            doc_id="doc-fallback-single",
+            filename="annual_report.pdf",
+            text="Risk Factors: Foreign currency fluctuations may impact future international revenue.",
+            page_number=2,
+            chunk_index=2,
+            char_count=84,
+        ),
+    ]
+
+    baseline = [1.0] + [0.0] * 383
+    # Target distance 0.8910 (> 0.85 threshold) for "summarize this document"
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"summarize this document": 0.8910},
+    )
+
+    test_vector_store.add_chunks(chunks, [baseline, baseline, baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="Summarize this document",
+        document_ids=["doc-fallback-single"],
+    )
+
+    # Fallback must trigger and return structural chunks ordered by chunk_index
+    assert len(passages) == 3
+    assert passages[0].chunk_id == "doc-fallback-single_p1_c0"
+    assert passages[0].doc_id == "doc-fallback-single"
+    assert passages[0].filename == "annual_report.pdf"
+    assert passages[0].page_numbers == [1]
+    assert passages[1].chunk_id == "doc-fallback-single_p1_c1"
+    assert passages[2].chunk_id == "doc-fallback-single_p2_c2"
+
+
+def test_document_scoped_summary_fallback_metadata_integrity(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 2: Fallback passages retain valid page/citation metadata and integrate with PromptService."""
+    doc_meta = DocumentMetadata(
+        document_id="doc-fallback-meta",
+        filename="project_plan.pdf",
+        file_size_bytes=1024,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="doc-fallback-meta_p1_c0",
+        doc_id="doc-fallback-meta",
+        filename="project_plan.pdf",
+        text="Project DocuMind AI aims to deliver grounded document question answering with verified citations.",
+        page_number=1,
+        chunk_index=0,
+        char_count=98,
+    )
+
+    baseline = [1.0] + [0.0] * 383
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"what is this document about": 0.8910},
+    )
+    test_vector_store.add_chunks([chunk], [baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="What is this document about?",
+        document_ids=["doc-fallback-meta"],
+    )
+
+    assert len(passages) == 1
+    p = passages[0]
+    assert p.doc_id == "doc-fallback-meta"
+    assert p.filename == "project_plan.pdf"
+    assert p.page_numbers == [1]
+    assert "DocuMind AI" in p.text
+    assert p.similarity_score >= 0.0
+
+    # Verify PromptService consumes fallback passages cleanly with citations
+    prompt_svc = PromptService()
+    sys_inst, user_content, sources = prompt_svc.build_prompt("What is this document about?", passages)
+    assert len(sources) == 1
+    assert sources[0].source_id == 1
+    assert sources[0].document_id == "doc-fallback-meta"
+    assert sources[0].filename == "project_plan.pdf"
+    assert sources[0].page_numbers == [1]
+    assert "[1]" in user_content
+    assert "Project DocuMind AI" in user_content
+
+
+def test_document_scoped_fallback_does_not_trigger_for_unrelated_query(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 3: Unrelated question with distance > 0.85 does NOT trigger fallback."""
+    doc_meta = DocumentMetadata(
+        document_id="doc-unrelated",
+        filename="resume.pdf",
+        file_size_bytes=1024,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="doc-unrelated_p1_c0",
+        doc_id="doc-unrelated",
+        filename="resume.pdf",
+        text="Kamal Patil is a software engineer specializing in distributed systems and web applications.",
+        page_number=1,
+        chunk_index=0,
+        char_count=94,
+    )
+
+    baseline = [1.0] + [0.0] * 383
+    # Distance 0.95 for completely unrelated question
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"recipe for italian carbonara": 0.95},
+    )
+    test_vector_store.add_chunks([chunk], [baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="What is the recipe for Italian carbonara?",
+        document_ids=["doc-unrelated"],
+    )
+
+    # Must NOT trigger fallback, returning 0 passages so insufficient evidence triggers
+    assert len(passages) == 0
+
+
+def test_document_scoped_fallback_does_not_trigger_without_document_filter(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 4: Summary query without explicit document filter does NOT trigger fallback."""
+    doc_meta = DocumentMetadata(
+        document_id="doc-nofilter",
+        filename="report.pdf",
+        file_size_bytes=1024,
+        total_pages=1,
+        total_chunks=1,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk = TextChunk(
+        chunk_id="doc-nofilter_p1_c0",
+        doc_id="doc-nofilter",
+        filename="report.pdf",
+        text="Quarterly quarterly update covering Q3 operations, revenue metrics, and market outlook.",
+        page_number=1,
+        chunk_index=0,
+        char_count=87,
+    )
+
+    baseline = [1.0] + [0.0] * 383
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"summarize this document": 0.8910},
+    )
+    test_vector_store.add_chunks([chunk], [baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="Summarize this document",
+        document_ids=None,
+    )
+
+    assert len(passages) == 0
+
+
+def test_document_scoped_fallback_does_not_trigger_for_multi_documents(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 5: Multi-document query with candidate distance > 0.85 does NOT trigger fallback."""
+    for doc_id, fname in [("doc-multi-1", "doc1.pdf"), ("doc-multi-2", "doc2.pdf")]:
+        test_metadata_store.save_document(
+            DocumentMetadata(
+                document_id=doc_id,
+                filename=fname,
+                file_size_bytes=1024,
+                total_pages=1,
+                total_chunks=1,
+                created_at="2026-10-26T17:00:00Z",
+            )
+        )
+
+    chunk1 = TextChunk(
+        chunk_id="doc-multi-1_p1_c0",
+        doc_id="doc-multi-1",
+        filename="doc1.pdf",
+        text="Content of document 1 describing cloud architectures and data pipelines.",
+        page_number=1,
+        chunk_index=0,
+        char_count=71,
+    )
+    chunk2 = TextChunk(
+        chunk_id="doc-multi-2_p1_c0",
+        doc_id="doc-multi-2",
+        filename="doc2.pdf",
+        text="Content of document 2 describing Kubernetes orchestration and CI/CD.",
+        page_number=1,
+        chunk_index=0,
+        char_count=67,
+    )
+
+    baseline = [1.0] + [0.0] * 383
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"summarize this document": 0.8910},
+    )
+    test_vector_store.add_chunks([chunk1, chunk2], [baseline, baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="Summarize this document",
+        document_ids=["doc-multi-1", "doc-multi-2"],
+    )
+
+    assert len(passages) == 0
+
+
+def test_normal_retrieval_takes_precedence_over_fallback(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 6: When candidate distance <= 0.85, normal retrieval is used directly."""
+    doc_meta = DocumentMetadata(
+        document_id="doc-precedence",
+        filename="specs.pdf",
+        file_size_bytes=1024,
+        total_pages=1,
+        total_chunks=2,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    chunk_first = TextChunk(
+        chunk_id="doc-precedence_p1_c0",
+        doc_id="doc-precedence",
+        filename="specs.pdf",
+        text="Introduction and background on the project architecture and design.",
+        page_number=1,
+        chunk_index=0,
+        char_count=70,
+    )
+    chunk_relevant = TextChunk(
+        chunk_id="doc-precedence_p1_c1",
+        doc_id="doc-precedence",
+        filename="specs.pdf",
+        text="High-level summary of system performance, scalability benchmarks, and database latency.",
+        page_number=1,
+        chunk_index=1,
+        char_count=90,
+    )
+
+    baseline = [1.0] + [0.0] * 383
+    # Distance is 0.35 (well below 0.85 threshold)
+    embedding_svc = _create_mock_controlled_embedding_service(
+        chunk_baseline=baseline,
+        query_map={"give me a summary": 0.35},
+    )
+    test_vector_store.add_chunks([chunk_first, chunk_relevant], [baseline, baseline])
+
+    service = RetrievalService(
+        embedding_service=embedding_svc,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+
+    passages = service.retrieve(
+        question="Give me a summary",
+        document_ids=["doc-precedence"],
+    )
+
+    # Normal retrieval returns candidates directly
+    assert len(passages) >= 1
+    assert round(passages[0].distance, 2) == 0.35
+    assert passages[0].similarity_score == round(1.0 - 0.35, 4)
+
+
+def test_summary_fallback_empty_or_invalid_document_metadata(
+    test_vector_store: ChromaVectorStore,
+    test_metadata_store: DocumentMetadataStore,
+):
+    """Scenario 7: Empty or invalid document metadata handled safely without exceptions."""
+    baseline = [1.0] + [0.0] * 383
+    mock_emb = _create_mock_controlled_embedding_service(baseline, {})
+
+    # 1. Invalid doc_id raises DocumentNotFoundException
+    service = RetrievalService(
+        embedding_service=mock_emb,
+        vector_store=test_vector_store,
+        metadata_store=test_metadata_store,
+    )
+    with pytest.raises(DocumentNotFoundException):
+        service.retrieve(
+            question="Summarize this document",
+            document_ids=["non-existent-doc-id"],
+        )
+
+    # 2. Valid doc_id in metadata store but zero chunks stored in vector store
+    doc_meta = DocumentMetadata(
+        document_id="doc-empty-chunks",
+        filename="empty.pdf",
+        file_size_bytes=100,
+        total_pages=1,
+        total_chunks=0,
+        created_at="2026-10-26T17:00:00Z",
+    )
+    test_metadata_store.save_document(doc_meta)
+
+    passages = service.retrieve(
+        question="Summarize this document",
+        document_ids=["doc-empty-chunks"],
+    )
+    assert passages == []
 
 
 
